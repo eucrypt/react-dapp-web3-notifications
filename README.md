@@ -1,46 +1,206 @@
-# Getting Started with Create React App
+# Integrate web3 notifications using unmarshal push notifications.
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+### Create a react app
+```sh
+npx create-react-app unmarshal-notifications --template typescript && cd unmarshal-notifications
+```
 
-## Available Scripts
+### Install required packages
+```
+yarn add firebase
+yarn add react-toastify
+yarn add @mui/material @emotion/react @emotion/styled
+```
 
-In the project directory, you can run:
+To create a firebase project click here https://console.firebase.google.com
 
-### `npm start`
+#### Create a file `firebase.ts`
+```typescript
+import {initializeApp} from "firebase/app";
+import {getMessaging, getToken, onMessage} from "firebase/messaging";
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+const firebaseConfig = {
+ // Firebase config
+};
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+const vapidKey = 'FIREBASE_VAPID_KEY';
 
-### `npm test`
+const firebaseApp = initializeApp(firebaseConfig);
+const messaging = getMessaging(firebaseApp);
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+export const getFirebaseToken = () => {
+    return getToken(messaging, {vapidKey});
+}
 
-### `npm run build`
+export const onNewMessage = (callBack: (payload: any) => void) => {
+    onMessage(messaging, callBack)
+};
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+#### Create a file `Subscribe.tsx`
+```typescript
+import React, {Fragment, useEffect, useState} from 'react';
+import {Box, Button, Stack, TextField} from "@mui/material";
+import {toast} from "react-toastify";
+import {getFirebaseToken, onNewMessage} from "./firebase";
+import ListNotifications from "./ListNotifications";
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+const subscribeForTransactionalNotification = (address: string, fcmToken: string) => {
+    fetch(
+        `https://notify.unmarshal.com/v1/firebase/subscribe`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': "YOUR_API_KEY"
+            },
+            body: JSON.stringify({
+                fcm_token: fcmToken,
+                device_id: 'YOUR_DEVICE_ID',
+                wallet_ids: [address]
+            })
+        }
+    )
+        .then(response => response.json())
+        .then(result => toast.success("Subscribed successfully!!!"))
+        .catch(error => toast.error("Failed to subscribe!"));
+}
 
-### `npm run eject`
+const subscribe = (address: string) => {
+    getFirebaseToken()
+        .then((fcmToken: string) => subscribeForTransactionalNotification(address, fcmToken))
+        .catch(() => toast.error("Failed to get FCM token"))
+}
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+export interface Notification {
+    title: string;
+    body: string;
+    time: Date;
+    transactionHash: string;
+}
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+const Subscribe = () => {
+    const [address, updateAddress] = useState("")
+    const [notifications, updateNotifications] = useState<Array<Notification>>([])
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+    useEffect(() => {
+        onNewMessage(({notification, data}) => {
+            toast(<div>
+                <b>{notification?.title}</b>
+                <p>{notification?.body}</p>
+            </div>);
+            updateNotifications((value) => [{
+                title: notification?.title,
+                body: notification?.body,
+                time: new Date(),
+                transactionHash: JSON.parse(data.transaction).id
+            }, ...value])
+        })
+    }, [])
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+    return (
+        <Fragment>
+            <Box height={40}/>
+            <Stack spacing={3}>
+                <TextField label={"Enter your wallet address"} onChange={(e) => updateAddress(e.target.value)}/>
+                <Button variant={"outlined"} onClick={() => subscribe(address)}>Subscribe</Button>
+            </Stack>
+            <Box height={40}/>
+            <ListNotifications notifications={notifications}/>
+        </Fragment>
+    );
+};
 
-## Learn More
+export default Subscribe;
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+
+#### Create a file `ListNotifications.tsx`
+```typescript
+import TableContainer from "@mui/material/TableContainer";
+import Paper from "@mui/material/Paper";
+import Table from "@mui/material/Table";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import TableCell from "@mui/material/TableCell";
+import TableBody from "@mui/material/TableBody";
+import React from "react";
+import {Notification} from "./Subscribe";
+
+export  default function ListNotifications({notifications}: {notifications: Array<Notification>}) {
+    return <TableContainer component={Paper}>
+        <Table sx={{minWidth: 650}} aria-label="simple table">
+            <TableHead>
+                <TableRow>
+                    <TableCell align="center">Time</TableCell>
+                    <TableCell align="center">Transaction Hash</TableCell>
+                    <TableCell align="center">Title</TableCell>
+                    <TableCell align="center">Body</TableCell>
+                </TableRow>
+            </TableHead>
+            <TableBody>
+                {notifications.map((notification, index) => (
+                    <TableRow
+                        key={notification.title + index}
+                        sx={{'&:last-child td, &:last-child th': {border: 0}}}
+                    >
+                        <TableCell align="center">{notification.time.toLocaleTimeString()}</TableCell>
+                        <TableCell align="center">{notification.transactionHash}</TableCell>
+                        <TableCell align="center">{notification.title}</TableCell>
+                        <TableCell align="center">{notification.body}</TableCell>
+                    </TableRow>
+                ))}
+            </TableBody>
+        </Table>
+    </TableContainer>;
+}
+```
+
+#### Update `App.ts`  as below
+
+```typescript
+import React from 'react';
+import 'react-toastify/dist/ReactToastify.css';
+import Subscribe from "./notifications/Subscribe";
+import {Container} from "@mui/material";
+import {ToastContainer} from "react-toastify";
+
+function App() {
+  return (
+    <Container >
+        <ToastContainer />
+        <Subscribe/>
+    </Container>
+  );
+}
+
+export default App;
+```
+
+### Create a file `firebase-messaging-sw.js` in a public folder
+
+```javascript
+// Scripts for firebase and firebase messaging
+importScripts("https://www.gstatic.com/firebasejs/8.2.0/firebase-app.js");
+importScripts("https://www.gstatic.com/firebasejs/8.2.0/firebase-messaging.js");
+
+// Initialize the Firebase app in the service worker by passing the generated config
+const firebaseConfig ={
+    // Firebase config
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const messaging = firebase.messaging();
+
+messaging.onBackgroundMessage(function(payload) {
+    const notificationTitle = payload.notification.title;
+    const notificationOptions = {
+        body: payload.notification.body,
+    };
+
+    self.registration.showNotification(notificationTitle, notificationOptions);
+});
+```
